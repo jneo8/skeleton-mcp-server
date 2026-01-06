@@ -63,6 +63,13 @@ pre-commit: check  ## Run pre-commit checks
 
 .PHONY: check pre-commit
 
+##@ Release
+
+bump:  ## Bump version using commitizen
+	cz bump -s
+
+.PHONY: bump
+
 ##@ Help
 
 .PHONY: help
