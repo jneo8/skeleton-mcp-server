@@ -6,7 +6,6 @@ import (
 	"os"
 	"sync"
 
-	"github.com/jneo8/skeleton-mcp-server/pkg/app"
 	"github.com/jneo8/skeleton-mcp-server/pkg/cli"
 	"github.com/jneo8/skeleton-mcp-server/pkg/config"
 	"github.com/jneo8/skeleton-mcp-server/pkg/mcp"
@@ -14,6 +13,7 @@ import (
 	"github.com/mark3labs/mcp-go/server"
 	"github.com/rs/zerolog/log"
 	"github.com/spf13/cobra"
+	"github.com/spf13/viper"
 )
 
 var (
@@ -22,14 +22,23 @@ var (
 	buildDate = "unknown"
 )
 
+// AppConfig contains application-specific configuration
+type AppConfig struct {
+	MaxPingCount int `mapstructure:"max_ping_count"`
+}
+
 // ServerApp implements the app.App interface
 type ServerApp struct {
-	cfg  *config.Config
-	once sync.Once
+	cfg    *config.Config
+	appCfg *AppConfig
+	once   sync.Once
 }
 
 func NewServerApp(cfg *config.Config) *ServerApp {
-	return &ServerApp{cfg: cfg}
+	return &ServerApp{
+		cfg:    cfg,
+		appCfg: &AppConfig{},
+	}
 }
 
 func (a *ServerApp) GetConfig() *config.Config {
@@ -64,7 +73,14 @@ func (a *ServerApp) Shutdown(ctx context.Context) error {
 }
 
 // PingHandler is a simple handler that provides a "ping" tool.
-type PingHandler struct{}
+type PingHandler struct {
+	maxCount int
+	counter  int
+}
+
+func NewPingHandler(maxCount int) *PingHandler {
+	return &PingHandler{maxCount: maxCount}
+}
 
 func (h *PingHandler) AddTool(mcpServer *server.MCPServer, readOnly bool) error {
 	pingTool := mcpgo.NewTool(
@@ -72,34 +88,61 @@ func (h *PingHandler) AddTool(mcpServer *server.MCPServer, readOnly bool) error 
 		mcpgo.WithDescription("A simple tool that responds with pong."),
 	)
 	pingHandler := func(ctx context.Context, request mcpgo.CallToolRequest) (*mcpgo.CallToolResult, error) {
-		return mcpgo.NewToolResultText("pong"), nil
+		h.counter++
+		if h.maxCount > 0 && h.counter > h.maxCount {
+			return mcpgo.NewToolResultError(fmt.Sprintf("ping limit reached (max: %d)", h.maxCount)), nil
+		}
+		msg := fmt.Sprintf("pong (count: %d", h.counter)
+		if h.maxCount > 0 {
+			msg += fmt.Sprintf("/%d)", h.maxCount)
+		} else {
+			msg += ", unlimited)"
+		}
+		return mcpgo.NewToolResultText(msg), nil
 	}
 	mcpServer.AddTool(pingTool, pingHandler)
 	return nil
 }
 
 func (a *ServerApp) GetHandlers() ([]mcp.Handler, error) {
-	return []mcp.Handler{&PingHandler{}}, nil
+	return []mcp.Handler{NewPingHandler(a.appCfg.MaxPingCount)}, nil
 }
 
 func main() {
+	// Create app instance with initial config
+	application := NewServerApp(&config.Config{})
+
 	rootCmd := &cobra.Command{
 		Use:   "mcp-server",
 		Short: "A skeleton MCP server",
 		Long:  `A skeleton implementation of a server that uses the Model Context Protocol.`,
 	}
 
-	appFactory := func(cfg *config.Config) app.App {
-		return NewServerApp(cfg)
+	// Create serve command with combined default + custom configuration
+	serveOpts := cli.ServeOptions{
+		ConfigOptions: cli.ConfigOptions{
+			EnvPrefix: "SIMPLE_MCP",
+		},
+		// Add custom flags for this application
+		CustomFlagSetup: func(cmd *cobra.Command) error {
+			// Add application-specific flag
+			cmd.Flags().Int("max-ping-count", 0, "maximum number of ping requests (0 = unlimited)")
+
+			// Bind flag to viper so it can be loaded into appCfg
+			if err := viper.BindPFlag("max_ping_count", cmd.Flags().Lookup("max-ping-count")); err != nil {
+				return err
+			}
+
+			// Load app-specific config from viper after all flags are bound
+			cmd.PreRunE = func(cmd *cobra.Command, args []string) error {
+				return viper.Unmarshal(application.appCfg)
+			}
+
+			return nil
+		},
 	}
 
-	opts := cli.ConfigOptions{
-		ConfigName:  "simple-mcp-server",
-		ConfigPaths: []string{".", "/etc/simple-mcp-server"},
-		EnvPrefix:   "MCP",
-	}
-
-	rootCmd.AddCommand(cli.NewServeCommand(appFactory, opts))
+	rootCmd.AddCommand(cli.NewServeCommand(application, serveOpts))
 	rootCmd.AddCommand(cli.NewVersionCommand(version, commit, buildDate))
 
 	if err := rootCmd.Execute(); err != nil {
