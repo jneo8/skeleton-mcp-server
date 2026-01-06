@@ -3,7 +3,6 @@ package mcp
 import (
 	"context"
 	"fmt"
-	"net"
 
 	"github.com/jneo8/skeleton-mcp-server/pkg/config"
 	"github.com/mark3labs/mcp-go/server"
@@ -43,11 +42,11 @@ func startStdio(ctx context.Context, cfg *config.Config, mcpServer *server.MCPSe
 
 func startHTTP(ctx context.Context, cfg *config.Config, mcpServer *server.MCPServer) error {
 	log.Info().
-		Str("host", cfg.MCP.Transport.Host).
-		Int("port", cfg.MCP.Transport.Port).
+		Str("host", cfg.Server.Host).
+		Int("port", cfg.Server.Port).
 		Msg("Starting HTTP streamable transport")
 
-	addr := fmt.Sprintf("%s:%d", cfg.MCP.Transport.Host, cfg.MCP.Transport.Port)
+	addr := fmt.Sprintf("%s:%d", cfg.Server.Host, cfg.Server.Port)
 	httpServer := server.NewStreamableHTTPServer(mcpServer)
 
 	errChan := make(chan error, 1)

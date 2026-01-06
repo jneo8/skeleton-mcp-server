@@ -35,8 +35,8 @@ func Run(app App) error {
 
 	cfg := app.GetConfig()
 	mcpServer := server.NewMCPServer(
-		cfg.MCP.ServerName,
-		cfg.MCP.ServerVersion,
+		"mcp-server",
+		"dev",
 		server.WithToolCapabilities(true),
 	)
 
@@ -46,14 +46,14 @@ func Run(app App) error {
 	}
 
 	for _, h := range handlers {
-		if err := h.RegisterTools(mcpServer, cfg.MCP.ReadOnly); err != nil {
-			return fmt.Errorf("registering tools: %w", err)
+		if err := h.AddTool(mcpServer, app.GetConfig().Server.ReadOnly); err != nil {
+			return fmt.Errorf("error registering handler: %w", err)
 		}
 	}
 
-	transportStarter, err := mcp.GetTransportStarter(cfg.MCP.Transport.Type)
+	transportStarter, err := mcp.GetTransportStarter(app.GetConfig().Server.TransportType)
 	if err != nil {
-		return err
+		return fmt.Errorf("error getting transport starter: %w", err)
 	}
 
 	return transportStarter(ctx, cfg, mcpServer)
